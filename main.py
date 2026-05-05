@@ -10,6 +10,7 @@ import re
 import smtplib
 import subprocess
 import time
+from urllib.parse import urlparse
 from email.message import EmailMessage
 from pathlib import Path
 
@@ -90,11 +91,35 @@ def write_state(text: str) -> None:
 
 
 def fetch_page(url: str) -> str:
+    parsed_url = urlparse(url)
+    origin = f"{parsed_url.scheme}://{parsed_url.netloc}"
     response = requests.get(
         url,
         timeout=30,
-        headers={"User-Agent": "Mozilla/5.0"},
+        headers={
+            "User-Agent": os.environ.get(
+                "USER_AGENT",
+                (
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/120.0.0.0 Safari/537.36"
+                ),
+            ),
+            "Accept": (
+                "text/html,application/xhtml+xml,application/xml;q=0.9,"
+                "image/avif,image/webp,*/*;q=0.8"
+            ),
+            "Accept-Language": "en-US,en;q=0.9,sv;q=0.8",
+            "Cache-Control": "no-cache",
+            "Referer": origin,
+        },
     )
+    if response.status_code == 403:
+        raise RuntimeError(
+            "The website returned 403 Forbidden. It may be blocking GitHub "
+            "Actions runners; try again after this browser-like header change, "
+            "or run the watcher from another host if it still fails."
+        )
     response.raise_for_status()
     return response.text
 

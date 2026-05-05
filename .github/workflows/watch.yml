@@ -27,16 +27,33 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Validate required configuration
+        run: |
+          missing=0
+          for name in URL SMTP_HOST SMTP_USERNAME SMTP_PASSWORD EMAIL_TO; do
+            if [ -z "${!name}" ]; then
+              echo "::error::$name is not set. Add it in Settings > Secrets and variables > Actions."
+              missing=1
+            fi
+          done
+          exit "$missing"
+        env:
+          URL: ${{ secrets.URL || vars.URL }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST || vars.SMTP_HOST }}
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME || vars.SMTP_USERNAME }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD || vars.SMTP_PASSWORD }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO || vars.EMAIL_TO }}
+
       - name: Check website once
         run: python main.py --once
         env:
-          URL: ${{ secrets.URL }}
-          SMTP_HOST: ${{ secrets.SMTP_HOST }}
-          SMTP_PORT: ${{ secrets.SMTP_PORT }}
-          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
-          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
-          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
-          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          URL: ${{ secrets.URL || vars.URL }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST || vars.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT || vars.SMTP_PORT }}
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME || vars.SMTP_USERNAME }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD || vars.SMTP_PASSWORD }}
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM || vars.EMAIL_FROM }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO || vars.EMAIL_TO }}
 
       - name: Commit updated watcher state
         run: |
