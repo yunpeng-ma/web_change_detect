@@ -45,7 +45,11 @@ jobs:
           EMAIL_TO: ${{ secrets.EMAIL_TO || vars.EMAIL_TO }}
 
       - name: Check website once
-        run: python main.py --once
+        run: |
+          python main.py --once \
+            --quiet-start-hour "${QUIET_START_HOUR}" \
+            --quiet-end-hour "${QUIET_END_HOUR}" \
+            --max-random-delay-seconds "${MAX_RANDOM_DELAY_SECONDS}"
         env:
           URL: ${{ secrets.URL || vars.URL }}
           SMTP_HOST: ${{ secrets.SMTP_HOST || vars.SMTP_HOST }}
@@ -54,6 +58,15 @@ jobs:
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD || vars.SMTP_PASSWORD }}
           EMAIL_FROM: ${{ secrets.EMAIL_FROM || vars.EMAIL_FROM }}
           EMAIL_TO: ${{ secrets.EMAIL_TO || vars.EMAIL_TO }}
+          SCRAPINGBEE_API_KEY: ${{ secrets.SCRAPINGBEE_API_KEY }}
+          SCRAPINGBEE_RENDER_JS: ${{ vars.SCRAPINGBEE_RENDER_JS || 'false' }}
+          # Quiet hours use 24-hour time: 0 is midnight/12 AM, 6 is 6 AM,
+          # 12 is noon/12 PM, and 23 is 11 PM. The start hour is included
+          # and the end hour is excluded, so 0-6 skips 00:00 through 05:59.
+          QUIET_START_HOUR: ${{ vars.QUIET_START_HOUR || '0' }}
+          QUIET_END_HOUR: ${{ vars.QUIET_END_HOUR || '6' }}
+          MAX_RANDOM_DELAY_SECONDS: ${{ vars.MAX_RANDOM_DELAY_SECONDS || '300' }}
+          TZ: ${{ vars.TZ || 'Europe/Stockholm' }}
 
       - name: Commit updated watcher state
         run: |

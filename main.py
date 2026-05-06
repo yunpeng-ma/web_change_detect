@@ -6,6 +6,7 @@ import hashlib
 import html
 import json
 import os
+import random
 import re
 import smtplib
 import subprocess
@@ -20,6 +21,9 @@ import requests
 ENV_FILE = Path(".env")
 STATE_FILE = Path("last_state.txt")
 DEFAULT_CHECK_INTERVAL_SECONDS = 300
+DEFAULT_MAX_RANDOM_DELAY_SECONDS = 300
+DEFAULT_QUIET_START_HOUR = 0
+DEFAULT_QUIET_END_HOUR = 6
 LEGACY_STATE_PREFIX = "visible-text-v1:"
 STATE_PREFIX = "visible-text-v2:"
 MAX_CHANGE_LINES = 40
@@ -90,7 +94,65 @@ def write_state(text: str) -> None:
     )
 
 
+def validate_hour(value: int, name: str) -> int:
+    if not 0 <= value <= 23:
+        raise SystemExit(f"{name} must be between 0 and 23.")
+    return value
+
+
+def validate_non_negative(value: int, name: str) -> int:
+    if value < 0:
+        raise SystemExit(f"{name} must be 0 or greater.")
+    return value
+
+
+def in_quiet_hours(hour: int, start_hour: int, end_hour: int) -> bool:
+    if start_hour == end_hour:
+        return False
+
+    if start_hour < end_hour:
+        return start_hour <= hour < end_hour
+
+    return hour >= start_hour or hour < end_hour
+
+
+def skip_for_quiet_hours(start_hour: int, end_hour: int) -> bool:
+    current_hour = time.localtime().tm_hour
+    if not in_quiet_hours(current_hour, start_hour, end_hour):
+        return False
+
+    print(
+        f"Skipping check during quiet hours "
+        f"({start_hour:02d}:00-{end_hour:02d}:00)."
+    )
+    return True
+
+
+def sleep_random_delay(max_delay_seconds: int) -> None:
+    if max_delay_seconds <= 0:
+        return
+
+    delay = random.randint(0, max_delay_seconds)
+    if delay:
+        print(f"Waiting {delay} seconds before checking.")
+        time.sleep(delay)
+
+
 def fetch_page(url: str) -> str:
+    scrapingbee_api_key = os.environ.get("SCRAPINGBEE_API_KEY")
+    if scrapingbee_api_key:
+        response = requests.get(
+            "https://app.scrapingbee.com/api/v1/",
+            params={
+                "api_key": scrapingbee_api_key,
+                "url": url,
+                "render_js": os.environ.get("SCRAPINGBEE_RENDER_JS", "false"),
+            },
+            timeout=60,
+        )
+        response.raise_for_status()
+        return response.text
+
     parsed_url = urlparse(url)
     origin = f"{parsed_url.scheme}://{parsed_url.netloc}"
     response = requests.get(
@@ -233,10 +295,18 @@ def check_once(url: str) -> None:
     print("No change detected.")
 
 
-def run_forever(url: str, interval: int) -> None:
+def run_forever(
+    url: str,
+    interval: int,
+    quiet_start_hour: int,
+    quiet_end_hour: int,
+    max_random_delay_seconds: int,
+) -> None:
     while True:
         try:
-            check_once(url)
+            if not skip_for_quiet_hours(quiet_start_hour, quiet_end_hour):
+                sleep_random_delay(max_random_delay_seconds)
+                check_once(url)
         except Exception as error:
             print(f"Check failed: {error}")
 
@@ -250,20 +320,58 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Run one check and exit. Use this for GitHub Actions.",
     )
+    parser.add_argument(
+        "--quiet-start-hour",
+        type=int,
+        default=int(os.environ.get("QUIET_START_HOUR", DEFAULT_QUIET_START_HOUR)),
+        help="Hour to start skipping checks, in 24-hour time. Default: 0 (12 AM).",
+    )
+    parser.add_argument(
+        "--quiet-end-hour",
+        type=int,
+        default=int(os.environ.get("QUIET_END_HOUR", DEFAULT_QUIET_END_HOUR)),
+        help="Hour to resume checks, in 24-hour time. Default: 6 (6 AM).",
+    )
+    parser.add_argument(
+        "--max-random-delay-seconds",
+        type=int,
+        default=int(
+            os.environ.get(
+                "MAX_RANDOM_DELAY_SECONDS",
+                DEFAULT_MAX_RANDOM_DELAY_SECONDS,
+            )
+        ),
+        help="Maximum random delay before each check. Default: 300 seconds.",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
-    args = parse_args()
     load_env()
+    args = parse_args()
     url = required_env("URL")
     interval = int(os.environ.get("CHECK_INTERVAL_SECONDS", DEFAULT_CHECK_INTERVAL_SECONDS))
+    quiet_start_hour = validate_hour(args.quiet_start_hour, "--quiet-start-hour")
+    quiet_end_hour = validate_hour(args.quiet_end_hour, "--quiet-end-hour")
+    max_random_delay_seconds = validate_non_negative(
+        args.max_random_delay_seconds,
+        "--max-random-delay-seconds",
+    )
 
     if args.once:
+        if skip_for_quiet_hours(quiet_start_hour, quiet_end_hour):
+            return
+        sleep_random_delay(max_random_delay_seconds)
         check_once(url)
         return
 
-    run_forever(url, interval)
+    run_forever(
+        url,
+        interval,
+        quiet_start_hour,
+        quiet_end_hour,
+        max_random_delay_seconds,
+    )
 
 
 if __name__ == "__main__":
